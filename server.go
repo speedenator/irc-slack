@@ -78,9 +78,9 @@ func (s *Server) HandleMsg(conn *net.TCPConn, msg string) {
 	}
 	if !strings.HasSuffix(data, "\r\n") {
 		log.Warning("Invalid data: not terminated with <CR><LF>")
-		return
+	} else {
+		data = data[:len(data)-2]
 	}
-	data = data[:len(data)-2]
 
 	tokens := strings.Split(data, " ")
 	cmd := tokens[0]

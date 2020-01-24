@@ -180,6 +180,7 @@ func (ic IrcContext) UserIDsToNames(userIDs ...string) []string {
 	var names []string
 	// TODO implement using ic.GetUsers() instead
 	allUsers := ic.GetUsers(true)
+	log.Infof("Creating user map with %d users", len(allUsers))
 	usersMap := make(map[string]slack.User, len(allUsers))
 	for _, user := range allUsers {
 		usersMap[user.ID] = user

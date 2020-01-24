@@ -192,8 +192,8 @@ func usersInConversation(ctx *IrcContext, conversation string) ([]string, error)
 				if rlErr, ok := err.(*slack.RateLimitedError); ok {
 					// we were rate-limited. Let's wait as much as Slack
 					// instructs us to do
-					log.Warningf("Hit Slack API rate limiter. Waiting %v", rlErr.RetryAfter)
-					time.Sleep(rlErr.RetryAfter)
+					log.Warningf("Hit Slack API rate limiter. Waiting 2*%v", rlErr.RetryAfter)
+					time.Sleep(rlErr.RetryAfter * 2)
 					attempt++
 					continue
 				}
@@ -236,25 +236,37 @@ func joinChannels(ctx *IrcContext) error {
 	)
 	for {
 		attempt := 0
+		backoff := time.Duration(0) // exponential backoff in case we need it
+		oldCursor := ""
 		for {
+			oldCursor = nextCursor
 			// retry if rate-limited, no more than MaxSlackAPIAttempts times
 			if attempt >= MaxSlackAPIAttempts {
 				return fmt.Errorf("GetConversations: exceeded the maximum number of attempts (%d) with the Slack API", MaxSlackAPIAttempts)
 			}
 			log.Infof("GetConversations: attempt #%d, nextCursor=%s", attempt, nextCursor)
-			params := slack.GetConversationsParameters{
-				Types:  []string{"public_channel", "private_channel"},
+			params := slack.GetConversationsForUserParameters{
+				UserID: ctx.User.ID,
 				Cursor: nextCursor,
+				Types:  []string{"public_channel", "private_channel"},
+				//				Limit:  0,
+				// ExcludeArchived: false,
 			}
-			chans, nextCursor, err = ctx.SlackClient.GetConversations(&params)
+			chans, nextCursor, err = ctx.SlackClient.GetConversationsForUser(&params)
 			if err != nil {
 				log.Warningf("Failed to get conversations: %v", err)
 				if rlErr, ok := err.(*slack.RateLimitedError); ok {
 					// we were rate-limited. Let's wait as much as Slack
 					// instructs us to do
-					log.Warningf("Hit Slack API rate limiter. Waiting %v", rlErr.RetryAfter)
-					time.Sleep(rlErr.RetryAfter)
+					if backoff == time.Duration(0) {
+						backoff = rlErr.RetryAfter
+					} else {
+						backoff = backoff + backoff
+					}
+					log.Warningf("Hit Slack API rate limiter. Waiting %v", backoff)
+					time.Sleep(backoff)
 					attempt++
+					nextCursor = oldCursor // make sure we reset the cursor
 					continue
 				}
 				return fmt.Errorf("Cannot get slack channels: %v", err)
@@ -269,10 +281,12 @@ func joinChannels(ctx *IrcContext) error {
 	for _, ch := range channels {
 		if ch.IsMember {
 			if err := join(ctx, ch.ID, "#"+ch.Name, ch.Purpose.Value); err != nil {
+				log.Warningf("Error joining %s, returning err %s", ch.Name, err)
 				return err
 			}
 		}
 	}
+	log.Infof("Finished listing and joining channels!")
 	return nil
 }
 
